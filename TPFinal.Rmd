@@ -1,0 +1,309 @@
+---
+title: "La altura de los niños ¿afecta el rendimiento intelectual?"
+author: "Czernikier Alejandro, Lisa Fernando"
+date: "2024-11-16"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Instalar las librerías necesarias si aún no lo están
+if (!require("tidyverse")) install.packages("tidyverse")
+
+# Cargar la librería tidyverse
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+```
+
+## Cargamos el Dataset
+
+```{r}
+
+# Cargar el archivo .csv ya modificado
+# dataset creado tomando como base otro dataset (ver ref)
+# y realizando modificaciones 
+ds <- read.csv("score_pais.csv")
+
+summary(ds)
+unique(ds$country)
+```
+
+```{r}
+(prelim_plot <- ggplot(ds, aes(x = height, y = testScore)) +
+  geom_point())
+```
+
+# Modelo lineal simple
+
+Fiteamos un modelo lineal ignorando los países
+
+```{r}
+modlineal <- lm(testScore ~ height, data = ds)
+
+```
+
+```{r}
+(prelim_plot <- ggplot(ds, aes(x = height, y = testScore)) +
+  geom_point() +
+  geom_smooth(method = "lm"))
+
+summary(modlineal)
+```
+
+Según lo que se puede ver del summary y en el gráfico, parecería que los chicos mas altos son mas inteligentes.
+Algo extraño, la inteligencia no depende de la altura de la persona.
+
+Veamos si se cumplen los supuestos
+
+```{r}
+plot(modlineal, which = 1) 
+```
+
+No parece que haya una heterosedastidicad muy marcada
+
+```{r}
+plot(modlineal, which = 2)
+```
+
+Si bien se desvía un poco en los extremos no parece ser nada grave
+
+Ahora bien, respecto a independencia de los datos, tenemos información de distintos países.
+Cabe la posibilidad de que los datos que corresponden a un mismo país sean muy parecidos entre si, y diferentes al resto, es decir que haya cierta correlación.
+
+```{r}
+boxplot(testScore ~ country, data = ds, las = 2) 
+```
+
+```{r}
+colour_plot <- ggplot(ds, aes(x = height, y = testScore, colour = country)) +
+  geom_point(size = 2) +
+  theme_classic() +
+  labs(colour = "Country")  # Cambia el título de la leyenda
+theme(legend.position = "bottom")
+
+colour_plot
+
+```
+
+Del gráfico parecería que tanto las alturas como los scores están agrupados por países.
+No se cumple independencia.
+
+## Análisis Multiples
+
+```{r}
+(split_plot <- ggplot(aes(height, testScore), data = ds) + 
+  geom_point() + 
+  facet_wrap(~ country) +
+  xlab("height") + 
+  ylab("test score"))
+```
+
+Ahora bien, serian ocho análisis diferentes, y si tomamos en cuenta que para cada país hay datos de 3 ciudades diferentes, que probablemente ocurra lo mismo, tendríamos que hacer en total 24 análisis.
+Estamos hablando de 48 parámetros (b y m) en total, y están quedando solo 20 niños por ciudad.
+El problema esta en que estamos reduciendo drasticamente el tamaño de la muestra y al realizar tantos ajustes aumentamos la chance de rechazar la hipótesis nula cuando no deberíamos.
+
+Para poder usar todos los datos, pero aun así tener en cuenta la variación que genera cada país podemos usar un modelo lineal sumando la columna.
+
+## Modelo lineal multiple
+
+```{r}
+modLineal_pais <- lm(testScore ~ height + country, data = ds)
+summary(modLineal_pais)
+```
+
+Ahora la altura deja de ser significativa.
+Pero hay una vuelta de tuerca mas.
+Con este modelo estamos estimando la variación del testscore entre cada país.
+
+Pero a nosotros no nos interesa cuantificar cuanto cambia el score para cada país en especifico.
+Estamos buscando saber si la altura del chico afecta el score independientemente de que país sea.
+
+# Modelo mixto
+
+Acá es donde entra en juego el modelo mixto.
+Permite usar todos los datos y tener en cuenta las correlaciones entre datos que vienen del mismo país.
+
+```{r}
+library(lme4)
+```
+
+Ahora cuales de las variables son efectos fijos y cuales aleatorios?
+
+En nuestro caso, estamos interesados en ver si la altura de un chico impacta en la inteligencia.
+Por lo tanto la altura es una variable fija.
+
+Con recursos y tiempo ilimitados pordriamos muestrear todos los niños de todos los países del mundo, pero queremos generalizar basándonos en una muestra representativa.
+
+No nos interesa saber (en este caso) que tan mejores son los chicos del país A comparados con los chicos del país B, pero sabemos que los sistemas educativos de cada país pueden tener distinta calidad llevando a que los scores sean diferentes, y queremos saber cuanta variación es atribuible a esto cuando queremos predecir el score de un chico del país Z.
+
+Ajustamos el nuevo modelo
+
+```{r}
+modMixto <- lmer(testScore ~ height + (1|country), data = ds)
+summary(modMixto)
+```
+
+Del summary, efectos fijos, podemos ver que el error es mayor al coeficiente que acompaña la variable altura, por lo que no es distinguible de cero.
+
+Y también podemos ver de la parte de efectos aleatorios, que la varianza explicada por la variable país es aprox el 60% del total (340/(340+224)).
+Tener en cuenta que esta varianza es la que queda luego de haber ajustado el modelo con los efectos fijos.
+
+## Cumplimiento de supuestos
+
+Vamos a ver si los supuestos se cumplen
+
+```{r}
+plot(modMixto)
+```
+
+No parece haber patrones.
+
+```{r}
+qqnorm(resid(modMixto))
+qqline(resid(modMixto)) 
+```
+
+Ahora bien, hasta aca el modelo mixto que planteamos solo distingue los interceptos, pero la pendiente es la misma para todos los casos.
+
+## Modelo mixto con pendientes diferentes
+
+Si se quisiera dejar libre tanto el intercepto como la pendiente para cada pais la sintaxis seria la siguiente
+
+```{r}
+
+# Ajustar el modelo mixto
+modMixto2 <- lmer(testScore ~ height + (1 + height | country), data = ds)
+```
+
+# Resultados
+
+## Modelo mixto (intercept)
+
+```{r}
+library(ggeffects)  # install the package first if you haven't already, then load it
+
+# Extract the prediction data frame
+pred.mm <- ggpredict(modMixto, terms = c("height"))  
+
+# Plot the predictions 
+
+(ggplot(pred.mm) + 
+   geom_line(aes(x = x, y = predicted)) +
+   geom_ribbon(aes(x = x, ymin = predicted - std.error, ymax = predicted + std.error), 
+               fill = "lightgrey", alpha = 0.5) +  
+   geom_point(data = ds,
+              aes(x = height, y = testScore, colour = country)) + 
+   labs(x = "Altura (estandarizada)", y = "Test Score", 
+        title = "La altura no afecta la inteligencia en los niños") + 
+   theme_minimal()
+)
+```
+
+```{r}
+library(sjPlot)
+
+# Visualizamos los efectos aleatorios
+(re.effects <- plot_model(modMixto, type = "re", show.values = TRUE))
+
+
+# show summary
+summary(modMixto)
+
+```
+
+Este grafico muestra no el intercepto para cada pais sino la diferencia con vs el intercepto del modelo general (50.4 en nuestro caso)
+
+```{r}
+library(stargazer)
+
+stargazer(modMixto, type = "text",
+          digits = 2,
+          star.cutoffs = c(0.05, 0.01, 0.001),
+          digit.separator = "")
+```
+
+Si quisiéramos reportar el R2, en modelos mixtos tenemos dos métricas diferentes
+
+```{r}
+library(MuMIn)
+
+# Calcular R2 marginal y condicional
+r2 <- r.squaredGLMM(modMixto)
+print(r2)
+
+```
+
+El R2m (marginal) es la proporción de varianza explicada solo por efectos fijos, mientras que el R2c(condicional) es la proporción de la varianza explicada por los efectos fijos y aleatorios
+
+## Modelo Mixto (intercept + slope)
+
+```{r}
+# Visualizamos los efectos aleatorios
+(re.effects <- plot_model(modMixto2, type = "re", show.values = TRUE))
+
+
+# show summary
+summary(modMixto2)
+```
+
+```{r}
+stargazer(modMixto2, type = "text",
+          digits = 2,
+          star.cutoffs = c(0.05, 0.01, 0.001),
+          digit.separator = "")
+```
+
+```{r}
+# Calcular R2 marginal y condicional
+r2 <- r.squaredGLMM(modMixto2)
+print(r2)
+```
+
+## Comparamos ambos modelos mixtos
+
+Akaike Information Criterion (AIC): Penaliza la complejidad del modelo y favorece modelos más simples.Un valor más bajo indica un modelo mejor ajustado.
+
+Bayesian Information Criterion (BIC): Similar al AIC, pero penaliza más severamente los modelos con demasiados parámetros.
+Al igual que el AIC, valores más bajos son preferibles.
+
+```{r}
+# Extraer AIC y BIC de ambos modelos
+model_comparison <- data.frame(
+  Model = c("modMixto", "modMixto2"),
+  AIC = c(AIC(modMixto), AIC(modMixto2)),
+  BIC = c(BIC(modMixto), BIC(modMixto2))
+)
+
+# Mostrar la tabla
+print(model_comparison)
+
+```
+
+De la tabla podemos ver que ambos modelos performan de manera muy similar, los AIC son prácticamente iguales y el BIC favorece un poco al modelo mixto de intercepto solamente.
+Tiene sentido ya que la pendiente (altura) no influye en nuestra variable a explicar.
+
+Para este ejemplo no tendría sentido comparar la performance con el modelo lineal simple ya que la conclusión o explicación que se puede sacar de los dos tipos de modelo es completamente diferente.
+
+
+# Referencias
+
+https://gkhajduk.d.pr/9GPn/3nbbPoK6 (dataset original)
+
+https://fhernanb.github.io/libro_modelos_mixtos/
+
+https://www.ibm.com/docs/es/spss-statistics/25.0.0?topic=SSLVMB_25.0.0/spss/advanced/idh_mixl.htm
+
+https://gkhajduk.github.io/2017-03-09-mixed-models/
+
+https://es.wikipedia.org/wiki/Anexo:Pa%C3%ADses_por_estatura_media
+
+https://es.wikipedia.org/wiki/Informe_PISA
+
+
